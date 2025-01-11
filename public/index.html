@@ -8,15 +8,29 @@
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-    <div class="chat-container">
-        <div id="chat-box"></div>
-        <input type="text" id="username" placeholder="Enter your username" />
-        <button id="join-btn">Join</button>
-        <div id="chat-input">
-            <input type="text" id="message" placeholder="Type a message" />
-            <button id="send-btn">Send</button>
+    <div id="login-screen">
+        <h1>Login</h1>
+        <input type="text" id="login-username" placeholder="Enter your username">
+        <button id="login-btn">Login</button>
+    </div>
+
+    <div id="chat-app" class="hidden">
+        <aside id="user-list">
+            <h2>Online Users</h2>
+            <ul id="online-users"></ul>
+        </aside>
+        <div id="chat-container">
+            <header>
+                <h1>Chat Room</h1>
+            </header>
+            <main id="chat-box"></main>
+            <footer>
+                <input type="text" id="message" placeholder="Type a message...">
+                <button id="send-btn">Send</button>
+            </footer>
         </div>
     </div>
+
     <script src="scripts.js"></script>
 </body>
 </html>

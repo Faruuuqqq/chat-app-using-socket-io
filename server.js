@@ -3,71 +3,103 @@ const app = express();
 const { Server } = require('socket.io');
 const http = require('http');
 const mysql = require('mysql2');
-const path = require('path');
+
+const bodyParser = require('body-parser');
+
+require('dotenv').config();
+const jwt = require('jsonwebtoken');
+const SECRET_KEY = process.env.JWT_SECRET;
+
 const server = http.createServer(app);
 const io = new Server(server);
 const port = 5000;
 
-// MySQL connection
+// Middleware
+app.use(express.static('public'));
+app.use(bodyParser.json());
+
+// MySQL Connection
 const db = mysql.createConnection({
     host: 'localhost',
     user: 'root',
-    password: '',
+    password: 'root123',
     database: 'chat_app'
 });
 
 db.connect((err) => {
     if (err) throw err;
-    console.log('Connected to MySQL database.');
+    console.log("Connected to MySQL database.");
 });
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
+// User Authentication
+app.post('/login', (req, res) => {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: "Username is required" });
 
-// Send index.html
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: '1h' });
+    return res.json({ token });
 });
 
-// Socket.io connection
+// Fetch Chat History with Pagination
+app.get('/messages', (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const offset = (page - 1) * limit;
+
+    db.query(
+        "SELECT * FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+        [parseInt(limit), parseInt(offset)],
+        (err, results) => {
+            if (err) return res.status(500).json({ error: "Database error" });
+            res.json(results.reverse()); // Reverse to show oldest first
+        }
+    );
+});
+
+// WebSocket Connection
+let onlineUsers = {};
+
 io.on('connection', (socket) => {
-    console.log('A user connected');
+    let currentUser = null;
 
-    // Fetch chat history on connection
-    db.query('SELECT * FROM messages ORDER BY timestamp ASC', (err, results) => {
-        if (err) throw err;
-        socket.emit('chat history', results);
+    // Authenticate user
+    socket.on('authenticate', (token) => {
+        try {
+            const decoded = jwt.verify(token, SECRET_KEY);
+            currentUser = decoded.username;
+            onlineUsers[currentUser] = socket.id;
+
+            io.emit('update users', Object.keys(onlineUsers));
+            socket.emit('authenticated', { username: currentUser });
+        } catch (err) {
+            socket.emit('error', { message: "Authentication failed" });
+            socket.disconnect();
+        }
     });
 
-    // User joins
-    socket.on('join', (username) => {
-        socket.username = username;
-        io.emit('user joined', `${username} has joined the chat`);
+    // Handle messages
+    socket.on('send message', (message) => {
+        if (!currentUser) return;
+
+        const chat = { username: currentUser, chat: message };
+        db.query(
+            "INSERT INTO messages (username, chat) VALUES (?, ?)",
+            [chat.username, chat.chat],
+            (err) => {
+                if (err) return console.error(err);
+                io.emit('send message', { ...chat, timestamp: new Date() });
+            }
+        );
     });
 
-    // New message
-    socket.on('send message', (chat) => {
-        const timestamp = new Date().toISOString();
-        const message = { username: socket.username, chat, timestamp };
-        
-        // Broadcast message
-        io.emit('send message', message);
-
-        // Save to database
-        db.query('INSERT INTO messages SET ?', message, (err) => {
-            if (err) throw err;
-        });
-    });
-
-    // User disconnects
+    // Handle disconnect
     socket.on('disconnect', () => {
-        if (socket.username) {
-            io.emit('user left', `${socket.username} has left the chat`);
+        if (currentUser) {
+            delete onlineUsers[currentUser];
+            io.emit('update users', Object.keys(onlineUsers));
         }
     });
 });
 
-// Start server
 server.listen(port, () => {
     console.log(`Server is listening at http://localhost:${port}`);
 });
